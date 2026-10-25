@@ -16,10 +16,20 @@ if ($SelfTest) {
     Write-Host 'Проверка пройдена: 7 вопросов, все ответы верные.'
     exit
 }
-$configPath = "$PSScriptRoot/settings.json"
-$statePath = "$PSScriptRoot/state.json"
-function Save-Config { $script:config | ConvertTo-Json | Set-Content -LiteralPath $configPath -Encoding UTF8 }
-if (Test-Path -LiteralPath $configPath) {
+$dataDir = if ($env:BOT_DATA_DIR) { $env:BOT_DATA_DIR } else { $PSScriptRoot }
+if (-not (Test-Path -LiteralPath $dataDir)) { $null = New-Item -ItemType Directory -Path $dataDir -Force }
+$configPath = Join-Path $dataDir 'settings.json'
+$statePath = Join-Path $dataDir 'state.json'
+function Save-Config {
+    $stored = if ($env:BOT_TOKEN) { [pscustomobject]@{ owner=$script:config.owner } } else { $script:config }
+    $stored | ConvertTo-Json | Set-Content -LiteralPath $configPath -Encoding UTF8
+}
+if ($env:BOT_TOKEN) {
+    if (-not $env:BOT_SETUP_CODE -or $env:BOT_SETUP_CODE.Length -lt 16) { throw 'Задайте секретный BOT_SETUP_CODE длиной не менее 16 символов в настройках облака.' }
+    $owner = ''
+    if (Test-Path -LiteralPath $configPath) { $owner = (Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json).owner }
+    $config = [pscustomobject]@{ token=$env:BOT_TOKEN.Trim(); owner=$owner; pairing=$env:BOT_SETUP_CODE }
+} elseif (Test-Path -LiteralPath $configPath) {
     $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
 } else {
     Write-Host 'Вставьте токен из BotFather. Ввод скрыт, это нормально.'
@@ -35,7 +45,7 @@ function Api([string]$Method, $Body) {
     if (-not $r.ok) { throw 'Telegram отклонил запрос.' }
     return $r.result
 }
-$menu = @{ keyboard = @(@(@{text='Свободные даты'}, @{text='Прайс'}), @(@{text='Адрес'}, @{text='Оставить контакты'})); resize_keyboard = $true }
+$menu = @{ keyboard = @(@(@{text='Запись'}, @{text='Прайс'}, @{text='Адрес'})); resize_keyboard = $true }
 function Send($Id, [string]$Text) { $null = Api 'sendMessage' @{chat_id=$Id; text=$Text; reply_markup=$menu} }
 $state = @{ offset = 0; sessions = @{} }
 if (Test-Path -LiteralPath $statePath) {
@@ -48,10 +58,10 @@ if (Test-Path -LiteralPath $statePath) {
 function Save-State { $state | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $statePath -Encoding UTF8 }
 try { $me = Api 'getMe' @{} } catch { throw 'Не удалось подключиться. Проверьте интернет и токен в settings.json. Подробности скрыты, чтобы не показать токен.' }
 Write-Host "Бот: https://t.me/$($me.username)"
-if (-not $config.owner) {
+if (-not $config.owner -and -not $env:BOT_TOKEN) {
     Write-Host "Откройте бота в своём Telegram и отправьте: /owner $($config.pairing)"
 }
-Write-Host 'Бот работает, пока это окно открыто и компьютер подключён к интернету. Остановка: Ctrl+C.'
+Write-Host 'Бот запущен. Для работы должна быть запущена ровно одна копия.'
 while ($true) {
     try {
         $updates = Api 'getUpdates' @{offset=$state.offset; timeout=25; allowed_updates=@('message')}
@@ -69,8 +79,8 @@ while ($true) {
                     Send $id 'Бот пока настраивается. Пожалуйста, зайдите позже.'
                 } elseif ($text -eq '/cancel' -or $text -eq '/start') {
                     $state.sessions.Remove($id)
-                    Send $id 'Здравствуйте! Я помогу узнать свободные даты, цены и адрес. Выберите кнопку или напишите вопрос. Чтобы оставить заявку, нажмите «Оставить контакты». Отменить ввод можно командой /cancel.'
-                } elseif ($text -eq 'Оставить контакты') {
+                    Send $id 'Здравствуйте! Я помогу узнать свободные даты, цены и адрес. Выберите кнопку или напишите вопрос. Чтобы оставить заявку, отправьте /contact. Отменить ввод можно командой /cancel.'
+                } elseif ($text -eq 'Оставить контакты' -or $text -eq '/contact') {
                     $state.sessions[$id] = @{step='name'; name=''; phone=''}
                     Send $id 'Отправляя контакты, вы передаёте их мастеру для связи по заявке. Как вас зовут? Для отмены: /cancel.'
                 } elseif ($state.sessions.ContainsKey($id)) {
