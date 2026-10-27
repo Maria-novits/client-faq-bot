@@ -1,0 +1,14 @@
+{
+  "name": "pyatynailcreatorbot",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-25",
+  "workers_dev": true,
+  "triggers": { "crons": ["*/5 * * * *"] },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "pyatynailcreatorbot-db",
+      "database_id": "19b4b0e0-6202-40fd-9239-c611c2a29fd1"
+    }
+  ]
+}
